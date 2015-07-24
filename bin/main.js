@@ -8,11 +8,12 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     request = require('request').defaults({
         jar: true
     }),
-    pakjson = require('./package.json'),
+    pakjson = require('../package.json'),
     logger = require('./logger.js'),
     cheerio = require('cheerio'),
     deasync = require('deasync'),
     uuid = require('node-uuid'),
+    moment = require('moment'),
     chalk = require('chalk'),
     fs = require('fs');
 
@@ -24,22 +25,26 @@ var EventEmitter = new EventEmitter2({
 });
 
 var auth = {
+    pie: null,
+    etm: null,
     token: null,
     regToken: null,
-    endpointId: null
+    endpointId: null,
+    data: null
 };
 
 var URL = {
     login: 'https://login.skype.com/login?client_id=578134&redirect_uri=https%3A%2F%2Fweb.skype.com',
     ping: 'https://web.skype.com/api/v1/session-ping',
-    subscriptions: 'https://client-s.gateway.messenger.live.com/v1/users/ME/endpoints/SELF/subscriptions',
-    msgService: 'https://client-s.gateway.messenger.live.com/v1/users/ME/endpoints/%s/presenceDocs/messagingService',
     tokenAuth: 'https://api.asm.skype.com/v1/skypetokenauth',
     endpoints: 'https://client-s.gateway.messenger.live.com/v1/users/ME/endpoints',
-    poll: 'https://client-s.gateway.messenger.live.com/v1/users/ME/endpoints/SELF/subscriptions/0/poll',
-    chat: 'https://client-s.gateway.messenger.live.com/v1/users/ME/conversations/%s/messages',
     self: 'https://api.skype.com/users/self/profile',
-    contacts: 'https://contacts.skype.com/contacts/v1/users/%s/contacts'
+    contacts: 'https://contacts.skype.com/contacts/v1/users/%s/contacts',
+    chat: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/conversations/%s/messages',
+    subscriptions: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/endpoints/SELF/subscriptions',
+    msgService: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/endpoints/%s/presenceDocs/messagingService',
+    poll: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/endpoints/SELF/subscriptions/0/poll',
+    cloud: null
 };
 
 var subscriptionsObject = {
@@ -85,86 +90,159 @@ var SkypeAPI = function (dataObject) {
         }
     }
 
+    auth.data = dataObject;
+
     that = this;
 
-    performLogin(dataObject);
-};
+    var prepSteps = [
+        'Getting login information',
+        'Sending authentication data',
+        'Starting keep-alive session',
+        'Requesting ASM cookie',
+        'Finding registration token',
+        'Subscribing to endpoints',
+        'Registering message service'
+    ];
 
+    var prepFunctions = [
+        getLoginInfo,
+        sendAuthData,
+        startKeepAlive,
+        requestASM,
+        getRegToken,
+        subscribeEndpoints,
+        registerMsgSrv,
+    ];
 
-function performLogin(dataObject) {
-    var loggingIn = true;
-    request(URL.login, function (error, response, body) {
-        if (!error && response.statusCode == 200) {
-            logger.debug('Received login information');
-            $ = cheerio.load(body);
-            var etmVal, pieVal;
-            $('#etm').val() ? etmVal = $('#etm').val() : logger.fatal('etm error');
-            $('#pie').val() ? pieVal = $('#pie').val() : logger.fatal('pie error');
+    var funcIn = 0;
+    var loadTimer;
 
-            var postData = {
-                username: dataObject.username,
-                password: dataObject.password,
-                js_time: Date.now(),
-                pie: pieVal,
-                etm: etmVal
-            }
-
-            request.post({
-                url: URL.login,
-                form: postData
+    function runAll() {
+        clearInterval(loadTimer);
+        if (funcIn < prepFunctions.length) {
+            var i = 0;
+            loadTimer = setInterval(function () {
+                process.stdout.clearLine();
+                process.stdout.cursorTo(0);
+                i = (i + 1) % 4;
+                var dots = new Array(i + 1).join(".");
+                process.stdout.write('[' + moment().format('YYYY-MM-DD HH:mm:ss') + '] ' + chalk.green('[SkypeAPI] ') + chalk.gray('[INIT] ') + prepSteps[funcIn] + dots);
+            }, 200);
+            prepFunctions[funcIn](function () {
+                funcIn++;
+                runAll();
+            });
+        } else {
+            process.stdout.clearLine();
+            process.stdout.cursorTo(0);
+            pollEndpoint();
+            request({
+                url: URL.self,
+                headers: {
+                    'X-Skypetoken': auth.token
+                }
             }, function (error, response, body) {
                 if (!error && response.statusCode == 200) {
-                    logger.debug('Successfully posted auth data')
-                    $ = cheerio.load(body);
-                    $('input[name=skypetoken]').val() ? auth.token = $('input[name=skypetoken]').val() : logger.fatal('authToken failure');
-                    loggingIn = false;
+                    self = JSON.parse(body);
+                    logger.info('Logged in as ' + chalk.magenta(self.firstname));
+                } else {
+                    logger.error(error);
                 }
-            })
+            });
+        }
+    }
+    runAll();
+};
+
+function getLoginInfo(callback) {
+    request(URL.login, function (error, response, body) {
+        if (!error && response.statusCode == 200) {
+            $ = cheerio.load(body);
+            var etmVal, pieVal;
+            $('#etm').val() ? auth.etm = $('#etm').val() : logger.fatal('Could not find etm value!');
+            $('#pie').val() ? auth.pie = $('#pie').val() : logger.fatal('Could not find pie value!');
+            callback();
+        } else {
+            logger.error(e);
         }
     });
-    while (loggingIn) {
-        deasync.sleep(100);
+
+}
+
+function sendAuthData(callback) {
+    var postData = {
+        username: auth.data.username,
+        password: auth.data.password,
+        js_time: Date.now(),
+        pie: auth.pie,
+        etm: auth.etm
     }
-    getRegToken();
-    sessionKeepAlive();
+    request.post({
+        url: URL.login,
+        form: postData
+    }, function (error, response, body) {
+        if (!error && response.statusCode == 200) {
+            $ = cheerio.load(body);
+            $('input[name=skypetoken]').val() ? auth.token = $('input[name=skypetoken]').val() : logger.fatal('authToken failure');
+            auth.data = null;
+            callback();
+        } else {
+            logger.error(e);
+        }
+    })
+};
+
+function startKeepAlive(callback) {
+    var sessionUUID = uuid.v4();
+
+    function dontDieOnMe() {
+        try {
+            request.post({
+                url: URL.ping,
+                form: {
+                    sessionId: sessionUUID
+                },
+                headers: {
+                    'X-Skypetoken': auth.token
+                }
+            }, function (error, response, body) {
+                if (!error && response.statusCode == 200) {} else {
+                    logger.error(error);
+                }
+            })
+        } catch (e) {
+            logger.error(e);
+        }
+    }
     setInterval(function () {
-        sessionKeepAlive()
+        dontDieOnMe()
     }, 30000);
+    callback();
 };
 
-function sessionKeepAlive() {
-    try {
-        var sessionUUID = uuid.v4();
-        logger.debug(chalk.blue('[KEEPALIVE]'), 'Sent');
-        request.post({
-            url: URL.ping,
-            form: {
-                sessionId: sessionUUID
-            },
-            headers: {
-                'X-Skypetoken': auth.token
-            }
-        }, function (error, response, body) {
-            if (!error && response.statusCode == 200) {
-                logger.debug(chalk.blue('[KEEPALIVE]'), 'Received');
-            } else {
-                logger.error(error);
-            }
-        })
-    } catch (e) {
-        logger.error(e);
-    }
-};
-
-function getRegToken() {
+function requestASM(callback) {
     request.post({
         url: URL.tokenAuth,
         form: {
             skypetoken: auth.token
         }
     }, function (error, response, body) {
-        if (!error && response.statusCode == 204) {
-            logger.debug('Got ASM cookie');
+        if (error) logger.error(error);
+        callback();
+    });
+};
+
+function getRegToken(callback) {
+    request.post({
+        url: URL.endpoints,
+        form: '{}',
+        headers: {
+            'Authentication': 'skypetoken=' + auth.token
+        }
+    }, function (error, response, body) {
+        if (!error && (response.statusCode >= 301 && response.statusCode <= 303 || response.statusCode == 307)) {
+            URL.endpoints = response.headers.location;
+            URL.cloud = response.headers.location.split('https://')[1].split('client-s')[0];
             request.post({
                 url: URL.endpoints,
                 form: '{}',
@@ -172,58 +250,57 @@ function getRegToken() {
                     'Authentication': 'skypetoken=' + auth.token
                 }
             }, function (error, response, body) {
-                if (!error && response.statusCode == 201) {
-                    response.headers['set-registrationtoken'].split(';')[0] ? auth.regToken = response.headers['set-registrationtoken'].split(';')[0] : logger.fatal('RegToken failure');
-                    logger.debug('Got RegToken');
-                    response.headers['set-registrationtoken'].split('endpointId=')[1] ? auth.endpointId = response.headers['set-registrationtoken'].split('endpointId=')[1] : logger.fatal('endpointId failure');
-                    logger.debug('Got endpointId');
-                    subscribe();
-                } else {
-                    logger.error(error);
-                }
+                stripToken(response);
             });
+        } else if (!error && response.statusCode >= 201) {
+            stripToken(response);
         } else {
             logger.error(error);
         }
     });
+
+    function stripToken(data) {
+        data.headers['set-registrationtoken'].split(';')[0] ? auth.regToken = data.headers['set-registrationtoken'].split(';')[0] : logger.fatal('RegToken failure');
+        data.headers['set-registrationtoken'].split('endpointId=')[1] ? auth.endpointId = data.headers['set-registrationtoken'].split('endpointId=')[1] : logger.fatal('endpointId failure');
+        return callback();
+    }
 };
 
-function subscribe() {
+function subscribeEndpoints(callback) {
     request.post({
-        url: URL.subscriptions,
+        url: URL.subscriptions.replace('%e', URL.cloud),
         form: JSON.stringify(subscriptionsObject),
         headers: {
             RegistrationToken: auth.regToken,
             'Content-Type': 'application/json'
         }
     }, function (error, response, body) {
-        if (!error && response.statusCode == 201) {
-            logger.debug('Subscribed to endpoints');
-            request.put({
-                url: URL.msgService.replace('%s', auth.endpointId),
-                form: JSON.stringify(registrationObject),
-                headers: {
-                    RegistrationToken: auth.regToken,
-                    'Content-Type': 'application/json'
-                }
-            }, function (error, response, body) {
-                if (!error && response.statusCode == 200) {
-                    logger.debug('Registered message service');
-                    pollEndpoint();
-                } else {
-                    logger.error(error);
-                }
-            })
+        if (error && response.statusCode != 201) logger.fatal('subscribing to endpoints failed!');
+        callback();
+    });
+};
+
+function registerMsgSrv(callback) {
+    request.put({
+        url: URL.msgService.replace('%e', URL.cloud).replace('%s', auth.endpointId),
+        form: JSON.stringify(registrationObject),
+        headers: {
+            RegistrationToken: auth.regToken,
+            'Content-Type': 'application/json'
+        }
+    }, function (error, response, body) {
+        if (!error && response.statusCode == 200) {
+            callback();
         } else {
             logger.error(error);
         }
-    })
-}
+    });
+};
 
 function pollEndpoint() {
     setTimeout(function () {
         request.post({
-            url: URL.poll,
+            url: URL.poll.replace('%e', URL.cloud),
             headers: {
                 RegistrationToken: auth.regToken,
                 'Content-Type': 'application/json'
@@ -273,7 +350,7 @@ function sendMessage(channel, message) {
         clientmessageid: Date.now()
     }
     request.post({
-        url: URL.chat.replace('%s', channel),
+        url: URL.chat.replace('%e', URL.cloud).replace('%s', channel),
         headers: {
             RegistrationToken: auth.regToken,
             'Content-Type': 'application/json; charset=utf-8'
