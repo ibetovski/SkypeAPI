@@ -4,7 +4,7 @@
     At least it works. (Most of the time)
 */
 
-var EventEmitter2 = require('eventemitter2').EventEmitter2,
+var EventEmitter = require('events').EventEmitter,
     request = require('request').defaults({
         jar: true
     }),
@@ -15,14 +15,10 @@ var EventEmitter2 = require('eventemitter2').EventEmitter2,
     uuid = require('node-uuid'),
     moment = require('moment'),
     chalk = require('chalk'),
+    util = require('util'),
     fs = require('fs');
 
 var that = null;
-
-var EventEmitter = new EventEmitter2({
-    wildcard: true,
-    delimiter: ':'
-});
 
 var auth = {
     pie: null,
@@ -320,6 +316,7 @@ function pollEndpoint() {
     }, 1000);
 }
 
+// TODO: FORMAT MORE EVENTS
 function formatEvent(e) {
     switch (e.resourceType) {
     case 'NewMessage':
@@ -342,7 +339,14 @@ function formatEvent(e) {
     }
 };
 
-function sendMessage(channel, message) {
+//Inherit eventemitter
+util.inherits(SkypeAPI, EventEmitter);
+
+/*
+	ALL EVENTS/PROTOTYPES GO HERE
+*/
+
+SkypeAPI.prototype.sendMessage = function (channel, message) {
     var messageObject = {
         content: message.toString(),
         messagetype: 'RichText',
@@ -361,10 +365,6 @@ function sendMessage(channel, message) {
             logger.error(error);
         }
     });
-}
-
-SkypeAPI.prototype.sendMessage = function (id, message) {
-    sendMessage(id, message);
 };
 
 SkypeAPI.prototype.getSelf = function (callback) {
@@ -376,71 +376,9 @@ SkypeAPI.prototype.getSelf = function (callback) {
     }, function (error, response, body) {
         if (!error && response.statusCode == 200) {
             self = JSON.parse(body);
+            callback(self);
         }
     });
-    return self;
 };
-
-SkypeAPI.prototype.addListener = function () {
-    EventEmitter.addListener.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.on = function () {
-    EventEmitter.on.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.onAny = function () {
-    EventEmitter.onAny.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.offAny = function () {
-    EventEmitter.offAny.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.once = function () {
-    EventEmitter.once.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.many = function () {
-    EventEmitter.many.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.removeListener = function () {
-    EventEmitter.removeListener.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.off = function () {
-    EventEmitter.off.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.removeAllListeners = function () {
-    EventEmitter.removeAllListeners.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.setMaxListeners = function () {
-    EventEmitter.setMaxListeners.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.listeners = function () {
-    EventEmitter.listeners.apply(EventEmitter, arguments);
-    return this;
-};
-
-SkypeAPI.prototype.emit = function () {
-    EventEmitter.emit.apply(EventEmitter, arguments);
-    return this;
-};
-
-
 
 module.exports = SkypeAPI;

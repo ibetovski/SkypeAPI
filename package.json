@@ -1,6 +1,6 @@
 {
   "name": "skypeapi",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": "Zegura <https://github.com/Zegura>",
   "description": "A generic API for accessing and interacting with Skype.",
   "main": "./bin/main.js",
