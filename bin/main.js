@@ -1,9 +1,3 @@
-/* 
-    I'm messy alright?
-
-    At least it works. (Most of the time)
-*/
-
 var EventEmitter = require('events').EventEmitter,
     request = require('request').defaults({
         jar: true
@@ -40,7 +34,7 @@ var URL = {
     subscriptions: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/endpoints/SELF/subscriptions',
     msgService: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/endpoints/%s/presenceDocs/messagingService',
     poll: 'https://%eclient-s.gateway.messenger.live.com/v1/users/ME/endpoints/SELF/subscriptions/0/poll',
-    cloud: null
+    cloud: ''
 };
 
 var subscriptionsObject = {
@@ -325,6 +319,8 @@ function formatEvent(e) {
             that.emit('Chat', e.resource);
         } else if (e.resource.messagetype === 'Control/LiveState') {
             that.emit('LiveState', e.resource);
+        } else {
+            logger.error(chalk.red('[UNKNOWN EVENT]'), e); 
         }
         break;
     case 'EndpointPresence':
