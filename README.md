@@ -1,4 +1,7 @@
 # SkypeAPI
+
+[![npm package](https://nodei.co/npm/skypeapi.png?downloads=true&downloadRank=true&stars=true)](https://nodei.co/npm/skypeapi/)
+
 A generic API for accessing and interacting with Skype.
 
 Unlike some other 3rd-party API's for Skype, this one requires no Skype client to be running.
